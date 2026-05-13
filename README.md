@@ -1,6 +1,8 @@
 # WxCC Draw.io Library
 
-A draw.io shape library containing 53 nodes that mirror the activity palette in Webex Contact Center (WxCC) Flow Designer. Each shape is pre-styled with the correct category color, badge icon, section layout, and connection ports so diagrams look like the real designer without needing a live environment.
+A draw.io shape library containing 53 nodes that mirror the activity palette in Webex Contact Center (WxCC) Flow Designer.
+
+![Sample Flow](SampleFlow.png) Each shape is pre-styled with the correct category color, badge icon, section layout, and connection ports so diagrams look like the real designer without needing a live environment.
 
 ---
 
@@ -8,7 +10,7 @@ A draw.io shape library containing 53 nodes that mirror the activity palette in 
 
 1. Open [app.diagrams.net](https://app.diagrams.net) or the draw.io desktop app.
 2. Go to **File > Open Library from > This Device**.
-3. Select `WxCC-Nodes.xml` from this repository.
+3. Select `WxCC-FlowBuilder-Activities.xml` from this repository.
 4. The **WxCC** panel appears in the left sidebar. Drag any shape onto the canvas to use it.
 
 ---
