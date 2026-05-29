@@ -1,24 +1,41 @@
-# WxCC Draw.io Library
+# Webex Flow Designer draw.io Libraries
 
-A draw.io shape library containing 53 nodes that mirror the activity palette in Webex Contact Center (WxCC) Flow Designer.
-
-![Sample Flow](SampleFlow.png) Each shape is pre-styled with the correct category color, badge icon, section layout, and connection ports so diagrams look like the real designer without needing a live environment.
+draw.io shape libraries for designing **Webex Contact Center (WxCC)** and **Webex Connect** flow diagrams. Each library mirrors the activity palette of its respective designer so diagrams look like the real tool without needing a live environment.
 
 ---
 
-## Importing the Library
+## Libraries
+
+### Webex Contact Center (WxCC)
+
+`WxCC-FlowBuilder-Activities.xml` — 53 nodes matching the WxCC Flow Builder activity palette.
+
+![WxCC Sample Flow](SampleFlow.png)
+
+### Webex Connect
+
+`WxConnect-Node-Library.xml` — nodes matching the Webex Connect flow designer.
+
+![Webex Connect Sample Flow](WxConnect-SampleFlow.png)
+
+---
+
+## Importing a Library
 
 1. Open [app.diagrams.net](https://app.diagrams.net) or the draw.io desktop app.
 2. Go to **File > Open Library from > This Device**.
-3. Select `WxCC-FlowBuilder-Activities.xml` from this repository.
-4. The **WxCC** panel appears in the left sidebar. Drag any shape onto the canvas to use it.
+3. Select the `.xml` file for the library you want to use.
+4. The library panel appears in the left sidebar. Drag any shape onto the canvas to use it.
+
+You can import both libraries at the same time — each appears as its own panel.
 
 ---
 
-## Node Categories
+## WxCC Node Categories
 
 | Category | Badge Color | Example Nodes |
 |---|---|---|
+| Start | Green (`#BCE36F`) | Start Flow |
 | Event | Teal (`#74E8D1`) | New Contact, Agent Offer, Contact Ended |
 | Action | Purple (`#E2CAFC`) | Play Message, Collect Digits, Queue Contact, HTTP Request |
 | Gateway | Yellow (`#FFCE73`) | Menu, Case, % Allocation, Condition, Business Hours |
@@ -29,43 +46,43 @@ A draw.io shape library containing 53 nodes that mirror the activity palette in 
 
 ---
 
-## Node Anatomy
+## Node Anatomy (WxCC)
 
-Each node is a stacked swimlane card divided into three sections:
+Each WxCC node is a stacked swimlane card divided into collapsible sections:
 
 ```
 +--------------------------------------------------+
 |  [badge]  Node Name              (header)        |
 |           subtitle                               |
 +--------------------------------------------------+
-|  Details                         (collapsed)     |
+|  + Details                       (collapsed)     |
 +--------------------------------------------------+
-|  Connections                     (expanded)      |
+|  - Connections                   (expanded)      |
 |    Default                              >        |
 |    Error                                >        |
 +--------------------------------------------------+
 ```
 
-- **Header** — displays the category badge icon and the node name. The entry connection point is on the left edge of the header.
-- **Details** — a collapsible section with a free-text content area for notes (collapsed by default).
-- **Connections** — lists each exit path. Each row has a connection port on its right edge (`>`).
+- **Header** — category badge icon and node name. Entry connection point is on the left edge.
+- **Details** — collapsible free-text area for notes, variable names, or config values. Collapsed by default.
+- **Connections** — one row per exit path, each with a connection port on the right edge.
 
-Variable-exit nodes (Menu, Case, % Allocation) have an additional **Options / Cases / Allocations** section with one row per configurable path, followed by an **Error handling** section.
+Variable-exit nodes (Menu, Case, % Allocation) have an **Options / Cases / Allocations** section and a separate **Error handling** section.
 
 ---
 
 ## Connecting Nodes
 
-- **Entry point** — the left edge of the header row. Hover over the header until the blue connection dot appears on the left, then drag to the source node's exit port.
-- **Exit ports** — the right edge of each row in the Connections section. Hover over a row to reveal its port dot, then drag to the target node's entry point.
+- **Entry point** — left edge of the header. Hover until the connection dot appears, then drag from a source exit port.
+- **Exit ports** — right edge of each row in the Connections section. Hover a row to reveal its port, then drag to a target node's entry point.
 
-draw.io will route edges automatically. Use **View > Connection Points** to show all ports while editing.
+draw.io routes edges automatically. Use **View > Connection Points** to display all ports while editing.
 
 ---
 
 ## Editing the Details Section
 
-Click the **Details** section header to expand it. Double-click inside the content area to type notes — configuration values, variable names, prompt text, or anything relevant to the node's configuration. The section collapses back to a single row in the stacked layout.
+Click the **+** on the Details header to expand it. Double-click inside the content area to type notes. The section collapses back to a single row when closed.
 
 ---
 
@@ -73,9 +90,8 @@ Click the **Details** section header to expand it. Double-click inside the conte
 
 Variable-exit nodes (Menu, Case, % Allocation) support editable exit rows:
 
-- **Add a row** — right-click the node and choose **Duplicate** on an existing option row, or drag a standalone row shape from the panel beneath the node.
-- **Remove a row** — select the row cell and press Delete. The stack layout reflows automatically.
-- **Rename a row** — double-click the row label text and type the new name.
+- **Add a row** — right-click the node and select **Add Row**, or duplicate an existing row.
+- **Remove a row** — select the row and press Delete. The layout reflows automatically.
+- **Rename a row** — double-click the row label and type the new name.
 
-Fixed-exit nodes (Play Message, Collect Digits, etc.) have pre-defined exits that match the WxCC designer. Avoid deleting these rows unless the exit genuinely does not apply to your flow.
-
+Fixed-exit nodes have pre-defined exits that match the WxCC designer. Avoid deleting these unless the exit does not apply to your flow.
