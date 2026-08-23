@@ -1,0 +1,734 @@
+#!/usr/bin/env python3
+"""
+Generate draw.io XML library for WxCC (Webex Contact Center) flow nodes.
+
+Architecture: swimlane + childLayout=stackLayout
+  • Container: swimlane with colored header (fillColor = category header_bg)
+  • Header value: HTML table with badge div + name + subtitle + blue dot
+  • Rows: native draw.io child mxCells stacked below header (one per exit)
+  • Section header rows (bold, gray bg) separate groupings in variable nodes
+  • No custom connection circles — rows use portConstraint=eastwest
+
+Output: WxCC-Nodes.xml — import via File > Open Library from > This Device
+"""
+
+import base64
+import html as html_mod
+import json
+import re
+import subprocess
+import sys
+import urllib.parse
+import zlib
+from pathlib import Path
+
+MOMENTUM = str(Path.home() / ".local/bin/momentum")
+
+CARD_W    = 230
+HDR_H     = 56   # swimlane startSize (badge 36px + 10px pad top + 10px pad bottom)
+ROW_H     = 30   # height of each stackLayout child row
+DETAILS_H = 60   # height of the editable details content row
+
+# ── Category colours ──────────────────────────────────────────────────────────
+CAT = {
+    "action":      {"header_bg": "#faf5fe", "badge_fill": "#E2CAFC", "badge_arc": 7},
+    "gateway":     {"header_bg": "#fff6e6", "badge_fill": "#FFCE73", "badge_arc": 7},
+    "terminating": {"header_bg": "#fff5f7", "badge_fill": "#FFC7D2", "badge_arc": 50},
+    "end":         {"header_bg": "#fff5f7", "badge_fill": "#FFC7D2", "badge_arc": 50},
+    "start":       {"header_bg": "#f0fdf4", "badge_fill": "#BCE36F", "badge_arc": 7},
+    "event":       {"header_bg": "#f0fefb", "badge_fill": "#74E8D1", "badge_arc": 7},
+    "subflow":     {"header_bg": "#edf9ff", "badge_fill": "#99DDFF", "badge_arc": 7},
+    "function":    {"header_bg": "#fff3e8", "badge_fill": "#FEBA7F", "badge_arc": 7},
+}
+
+# Exit IDs that represent the primary (happy-path) output
+PRIMARY_EXIT_IDS = {"default", "out", "ENDED", "true", "workingHours", "success"}
+
+# Human-readable label for primary exits (exit label field is empty in NODES)
+PRIMARY_EXIT_LABEL = {
+    "default":      "Default",
+    "out":          "Out",
+    "ENDED":        "Ended",
+    "true":         "True",
+    "workingHours": "Working Hours",
+    "success":      "Success",
+}
+
+# ── Momentum icon map  node_id → (name, weight) ───────────────────────────────
+ICON_MAP = {
+    "start-flow":               ("play-circle",          "bold"),
+    "event-new-contact":        ("headset",              "bold"),
+    "event-agent-offer":        ("headset",              "bold"),
+    "event-contact-predial":    ("headset",              "bold"),
+    "event-campaign-result":    ("headset",              "bold"),
+    "event-ani-updated":        ("headset",              "bold"),
+    "event-callback-failed":    ("headset",              "bold"),
+    "event-contact-ended":      ("headset",              "bold"),
+    "event-agent-assigned":     ("headset",              "bold"),
+    "event-reservation":        ("headset",              "bold"),
+    "event-last-agent":         ("headset",              "bold"),
+    "event-global-error":       ("headset",              "bold"),
+    "menu":                     ("list-numbered",        "bold"),
+    "case":                     ("share-c-native-adr",   "bold"),
+    "percent-allocation":       ("simple-promotion",     "bold"),
+    "play-message":             ("play-circle",          "bold"),
+    "collect-digits":           ("display-input",        "bold"),
+    "queue-contact":            ("call-handling",        "bold"),
+    "callback":                 ("audio-call",           "bold"),
+    "screen-pop":               ("pop-out",              "bold"),
+    "play-music":               ("ringtone",             "bold"),
+    "get-queue-info":           ("search",               "bold"),
+    "advanced-queue-info":      ("search",               "bold"),
+    "queue-to-agent":           ("queue-contact",        "bold"),
+    "http-request":             ("code-block",           "bold"),
+    "set-variable":             ("set-variable",         "bold"),
+    "bre-request":              ("server",               "bold"),
+    "parse":                    ("parse",                "bold"),
+    "subflow":                  ("link",                 "bold"),
+    "function":                 ("text-code-block",      "bold"),
+    "recording-control":        ("record-active",        "bold"),
+    "record":                   ("microphone",           "bold"),
+    "bridged-transfer":         ("exchange",             "bold"),
+    "wait":                     ("alarm",                "bold"),
+    "feedback":                 ("announcement",         "bold"),
+    "set-caller-id":            ("audio-call",           "bold"),
+    "escalate-cdg":             ("queue-contact",        "bold"),
+    "start-media-stream":       ("audio-broadcast",      "bold"),
+    "call-progress-analysis":   ("call-request",        "bold"),
+    "set-announcement":         ("announcement",         "bold"),
+    "send-digits":              ("display-input",        "bold"),
+    "set-whisper-announcement": ("active-speaker-alert", "bold"),
+    "set-contact-priority":     ("call-handling",        "bold"),
+    "schedule-callback":        ("audio-call",           "bold"),
+    "upload-audio":             ("cloud-upload",         "bold"),
+    "condition":                ("conditional-block",    "bold"),
+    "business-hours":           ("calendar-month",       "bold"),
+    "virtual-agent":            ("headset",              "bold"),
+    "virtual-agent-v2":         ("headset",              "bold"),
+    "feedback-v2":              ("announcement",         "bold"),
+    "cryptographic-hash":       ("security",             "bold"),
+    "generate-otp":             ("display-input",        "bold"),
+    "verify-otp":               ("check-circle",         "bold"),
+    "end-subflow":              ("error-legacy",         "bold"),
+    "event-contact-cleanup":    ("headset",              "bold"),
+    "event-invite-participant": ("headset",              "bold"),
+    "event-contact-park":       ("headset",              "bold"),
+    "event-contact-updated":    ("headset",              "bold"),
+    "event-stop-workflow":      ("headset",              "bold"),
+    "event-generic-action":     ("headset",              "bold"),
+    "event-flow-test":          ("headset",              "bold"),
+    "blind-transfer":           ("call-forward-settings","bold"),
+    "disconnect-contact":       ("call-private",         "bold"),
+    "end-flow":                 ("error-legacy",         "bold"),
+    "goto":                     ("forward-message",      "bold"),
+}
+
+_icon_cache: dict = {}
+
+def _fetch_icon(node_id: str) -> str:
+    """Return black-filled SVG as a url-encoded data URI, or '' on failure."""
+    entry = ICON_MAP.get(node_id)
+    if not entry:
+        return ""
+    name, weight = entry
+    key = (name, weight)
+    if key in _icon_cache:
+        return _icon_cache[key]
+    try:
+        r = subprocess.run(
+            [MOMENTUM, "icons", "get", name, "--stdout", "--weight", weight],
+            capture_output=True, text=True, timeout=15,
+        )
+        svg = r.stdout.strip()
+        if not svg.startswith("<svg"):
+            _icon_cache[key] = ""
+            return ""
+        svg = re.sub(r'\sfill="[^"]*"', '', svg)
+        svg = svg.replace("<svg ", '<svg fill="black" ')
+        uri = "data:image/svg+xml," + urllib.parse.quote(svg)
+        _icon_cache[key] = uri
+        return uri
+    except Exception:
+        _icon_cache[key] = ""
+        return ""
+
+
+# ── Node Catalog ───────────────────────────────────────────────────────────────
+NODES = [
+    # ── Start / Event ──────────────────────────────────────────────────────────
+    {"id": "start-flow",    "display": "Start Flow",    "subtitle": "NewContact",
+     "style_key": "start",  "variable": False, "entry": False,
+     "exits": [{"id": "out", "label": "", "color_key": "out"}]},
+
+    # ── Event Handlers ─────────────────────────────────────────────────────────
+    {"id": "event-new-contact",      "display": "New Contact",          "subtitle": "NewPhoneContact",
+     "style_key": "event", "variable": False, "entry": True,
+     "exits": [{"id": "out", "label": "", "color_key": "out"}]},
+
+    {"id": "event-agent-offer",      "display": "Agent Offer",          "subtitle": "AgentOfferContact",
+     "style_key": "event", "variable": False, "entry": True,
+     "exits": [{"id": "out", "label": "", "color_key": "out"}]},
+
+    {"id": "event-contact-predial",  "display": "Contact Predial",      "subtitle": "ContactPredial",
+     "style_key": "event", "variable": False, "entry": True,
+     "exits": [{"id": "out", "label": "", "color_key": "out"}]},
+
+    {"id": "event-campaign-result",  "display": "Campaign Result",      "subtitle": "ContactOutboundCampaignResult",
+     "style_key": "event", "variable": False, "entry": True,
+     "exits": [{"id": "out", "label": "", "color_key": "out"}]},
+
+    {"id": "event-ani-updated",      "display": "ANI Updated",          "subtitle": "ContactAniUpdated",
+     "style_key": "event", "variable": False, "entry": True,
+     "exits": [{"id": "out", "label": "", "color_key": "out"}]},
+
+    {"id": "event-callback-failed",  "display": "Callback Failed",      "subtitle": "ContactCallbackFailed",
+     "style_key": "event", "variable": False, "entry": True,
+     "exits": [{"id": "out", "label": "", "color_key": "out"}]},
+
+    {"id": "event-contact-ended",    "display": "Contact Ended",        "subtitle": "ContactEnded",
+     "style_key": "event", "variable": False, "entry": True,
+     "exits": [{"id": "out", "label": "", "color_key": "out"}]},
+
+    {"id": "event-agent-assigned",   "display": "Agent Assigned",       "subtitle": "AgentContactAssigned",
+     "style_key": "event", "variable": False, "entry": True,
+     "exits": [{"id": "out", "label": "", "color_key": "out"}]},
+
+    {"id": "event-reservation",      "display": "Reservation Start",    "subtitle": "ContactReservationStarted",
+     "style_key": "event", "variable": False, "entry": True,
+     "exits": [{"id": "out", "label": "", "color_key": "out"}]},
+
+    {"id": "event-last-agent",       "display": "Last Agent Removed",   "subtitle": "ContactLastAgentRemoved",
+     "style_key": "event", "variable": False, "entry": True,
+     "exits": [{"id": "out", "label": "", "color_key": "out"}]},
+
+    {"id": "event-global-error",     "display": "Global Errors",        "subtitle": "GlobalErrorHandling",
+     "style_key": "event", "variable": False, "entry": True,
+     "exits": [{"id": "out", "label": "", "color_key": "out"}]},
+
+    {"id": "event-contact-cleanup",  "display": "Contact Cleanup",       "subtitle": "ContactCleanup",
+     "style_key": "event", "variable": False, "entry": True,
+     "exits": [{"id": "out", "label": "", "color_key": "out"}]},
+
+    {"id": "event-invite-participant", "display": "Invite Participant",  "subtitle": "ContactInviteParticipant",
+     "style_key": "event", "variable": False, "entry": True,
+     "exits": [{"id": "out", "label": "", "color_key": "out"}]},
+
+    {"id": "event-contact-park",     "display": "Contact Park",          "subtitle": "ContactPark",
+     "style_key": "event", "variable": False, "entry": True,
+     "exits": [{"id": "out", "label": "", "color_key": "out"}]},
+
+    {"id": "event-contact-updated",  "display": "Contact Updated",       "subtitle": "ContactUpdated",
+     "style_key": "event", "variable": False, "entry": True,
+     "exits": [{"id": "out", "label": "", "color_key": "out"}]},
+
+    {"id": "event-stop-workflow",    "display": "Stop Workflow",         "subtitle": "ContactStopWorkflow",
+     "style_key": "event", "variable": False, "entry": True,
+     "exits": [{"id": "out", "label": "", "color_key": "out"}]},
+
+    {"id": "event-generic-action",   "display": "Generic Action",        "subtitle": "GenericActionStartWorkflow",
+     "style_key": "event", "variable": False, "entry": True,
+     "exits": [{"id": "out", "label": "", "color_key": "out"}]},
+
+    {"id": "event-flow-test",        "display": "Flow Test",             "subtitle": "FlowTestEvent",
+     "style_key": "event", "variable": False, "entry": True,
+     "exits": [{"id": "out", "label": "", "color_key": "out"}]},
+
+    # ── Actions ────────────────────────────────────────────────────────────────
+    {"id": "play-message", "display": "Play Message", "subtitle": "play-message",
+     "style_key": "action", "variable": False, "entry": True,
+     "exits": [{"id": "default", "label": "", "color_key": "default"},
+               {"id": "error",   "label": "Error",   "color_key": "error"}]},
+
+    {"id": "collect-digits", "display": "Collect Digits", "subtitle": "ivr-collectdigits",
+     "style_key": "action", "variable": False, "entry": True,
+     "exits": [{"id": "default", "label": "",         "color_key": "default"},
+               {"id": "timeout", "label": "Timeout",  "color_key": "timeout"},
+               {"id": "invalid", "label": "Invalid",  "color_key": "invalid"},
+               {"id": "error",   "label": "Error",    "color_key": "error"}]},
+
+    {"id": "queue-contact", "display": "Queue Contact", "subtitle": "queue-contact",
+     "style_key": "action", "variable": False, "entry": True,
+     "exits": [{"id": "default", "label": "",         "color_key": "default"},
+               {"id": "failure", "label": "Failure",  "color_key": "failure"}]},
+
+    {"id": "callback", "display": "Callback", "subtitle": "callback",
+     "style_key": "action", "variable": False, "entry": True,
+     "exits": [{"id": "default", "label": "",         "color_key": "default"},
+               {"id": "failure", "label": "Failure",  "color_key": "failure"}]},
+
+    {"id": "screen-pop", "display": "Screen Pop", "subtitle": "screen-pop",
+     "style_key": "action", "variable": False, "entry": True,
+     "exits": [{"id": "default", "label": "", "color_key": "default"}]},
+
+    {"id": "play-music", "display": "Play Music", "subtitle": "play-music",
+     "style_key": "action", "variable": False, "entry": True,
+     "exits": [{"id": "default", "label": "",      "color_key": "default"},
+               {"id": "error",   "label": "Error", "color_key": "error"}]},
+
+    {"id": "get-queue-info", "display": "Get Queue Info", "subtitle": "queue-lookup",
+     "style_key": "action", "variable": False, "entry": True,
+     "exits": [{"id": "default",          "label": "",              "color_key": "default"},
+               {"id": "insufficientdata", "label": "Insuff. Data",  "color_key": "insufficientdata"},
+               {"id": "failure",          "label": "Failure",       "color_key": "failure"}]},
+
+    {"id": "advanced-queue-info", "display": "Adv. Queue Info",
+     "subtitle": "advanced-queue-info",
+     "style_key": "action", "variable": False, "entry": True,
+     "exits": [{"id": "default", "label": "",        "color_key": "default"},
+               {"id": "failure", "label": "Failure", "color_key": "failure"}]},
+
+    {"id": "queue-to-agent", "display": "Queue to Agent", "subtitle": "queue-to-agent",
+     "style_key": "action", "variable": False, "entry": True,
+     "exits": [{"id": "default", "label": "",      "color_key": "default"},
+               {"id": "error",   "label": "Error", "color_key": "error"}]},
+
+    {"id": "http-request", "display": "HTTP Request", "subtitle": "http-request-v2",
+     "style_key": "action", "variable": False, "entry": True,
+     "exits": [{"id": "default", "label": "",         "color_key": "default"},
+               {"id": "success", "label": "Success",  "color_key": "success"},
+               {"id": "out",     "label": "Out",      "color_key": "out"},
+               {"id": "timeout", "label": "Timeout",  "color_key": "timeout"},
+               {"id": "failure", "label": "Failure",  "color_key": "failure"},
+               {"id": "error",   "label": "Error",    "color_key": "error"}]},
+
+    {"id": "set-variable", "display": "Set Variable", "subtitle": "set-variable",
+     "style_key": "action", "variable": False, "entry": True,
+     "exits": [{"id": "out",   "label": "",      "color_key": "out"},
+               {"id": "error", "label": "Error", "color_key": "error"}]},
+
+    {"id": "bre-request", "display": "BRE Request", "subtitle": "bre-request",
+     "style_key": "action", "variable": False, "entry": True,
+     "exits": [{"id": "default", "label": "", "color_key": "default"}]},
+
+    {"id": "parse", "display": "Parse", "subtitle": "parse-activity",
+     "style_key": "action", "variable": False, "entry": True,
+     "exits": [{"id": "default", "label": "",      "color_key": "default"},
+               {"id": "out",     "label": "Out",   "color_key": "out"},
+               {"id": "error",   "label": "Error", "color_key": "error"}]},
+
+    {"id": "subflow", "display": "Subflow", "subtitle": "subflow-handoff",
+     "style_key": "subflow", "variable": False, "entry": True,
+     "exits": [{"id": "default", "label": "",      "color_key": "default"},
+               {"id": "out",     "label": "Out",   "color_key": "out"},
+               {"id": "error",   "label": "Error", "color_key": "error"}]},
+
+    {"id": "function", "display": "Function", "subtitle": "fn-activity",
+     "style_key": "function", "variable": False, "entry": True,
+     "exits": [{"id": "default", "label": "",      "color_key": "default"},
+               {"id": "error",   "label": "Error", "color_key": "error"}]},
+
+    {"id": "recording-control", "display": "Recording Control",
+     "subtitle": "RecordingControl",
+     "style_key": "action", "variable": False, "entry": True,
+     "exits": [{"id": "default", "label": "",        "color_key": "default"},
+               {"id": "failure", "label": "Failure", "color_key": "failure"}]},
+
+    {"id": "record", "display": "Record", "subtitle": "record",
+     "style_key": "action", "variable": False, "entry": True,
+     "exits": [{"id": "default",         "label": "",         "color_key": "default"},
+               {"id": "noInputTimeout",  "label": "No Input", "color_key": "noInputTimeout"},
+               {"id": "undefinedErrors", "label": "Errors",   "color_key": "undefinedErrors"}]},
+
+    {"id": "bridged-transfer", "display": "Bridged Transfer", "subtitle": "bridged-transfer",
+     "style_key": "action", "variable": False, "entry": True,
+     "exits": [{"id": "default", "label": "",        "color_key": "default"},
+               {"id": "failure", "label": "Failure", "color_key": "failure"}]},
+
+    {"id": "wait", "display": "Wait", "subtitle": "wait-activity",
+     "style_key": "action", "variable": False, "entry": True,
+     "exits": [{"id": "default", "label": "",      "color_key": "default"},
+               {"id": "error",   "label": "Error", "color_key": "error"}]},
+
+    {"id": "feedback", "display": "Feedback", "subtitle": "Feedback",
+     "style_key": "action", "variable": False, "entry": True,
+     "exits": [{"id": "default", "label": "", "color_key": "default"}]},
+
+    {"id": "set-caller-id", "display": "Set Caller ID", "subtitle": "SetCallerID",
+     "style_key": "action", "variable": False, "entry": True,
+     "exits": [{"id": "default", "label": "", "color_key": "default"}]},
+
+    {"id": "escalate-cdg", "display": "Escalate CDG", "subtitle": "escalate-cdg",
+     "style_key": "action", "variable": False, "entry": True,
+     "exits": [{"id": "default", "label": "",      "color_key": "default"},
+               {"id": "error",   "label": "Error", "color_key": "error"}]},
+
+    {"id": "start-media-stream", "display": "Start Media Stream",
+     "subtitle": "start-media-stream",
+     "style_key": "action", "variable": False, "entry": True,
+     "exits": [{"id": "default", "label": "",        "color_key": "default"},
+               {"id": "failure", "label": "Failure", "color_key": "failure"}]},
+
+    {"id": "call-progress-analysis", "display": "Call Progress",
+     "subtitle": "call-progress-analysis",
+     "style_key": "action", "variable": False, "entry": True,
+     "exits": [{"id": "default", "label": "",        "color_key": "default"},
+               {"id": "failure", "label": "Failure", "color_key": "failure"}]},
+
+    {"id": "set-announcement", "display": "Set Announcement",
+     "subtitle": "set-announcement",
+     "style_key": "action", "variable": False, "entry": True,
+     "exits": [{"id": "default", "label": "",      "color_key": "default"},
+               {"id": "error",   "label": "Error", "color_key": "error"}]},
+
+    {"id": "send-digits", "display": "Send Digits", "subtitle": "send-digits",
+     "style_key": "action", "variable": False, "entry": True,
+     "exits": [{"id": "default", "label": "",        "color_key": "default"},
+               {"id": "failure", "label": "Failure", "color_key": "failure"}]},
+
+    {"id": "set-whisper-announcement", "display": "Set Whisper Ann.",
+     "subtitle": "set-whisperannouncement",
+     "style_key": "action", "variable": False, "entry": True,
+     "exits": [{"id": "default", "label": "",      "color_key": "default"},
+               {"id": "error",   "label": "Error", "color_key": "error"}]},
+
+    {"id": "set-contact-priority", "display": "Set Priority",
+     "subtitle": "set-contact-priority",
+     "style_key": "action", "variable": False, "entry": True,
+     "exits": [{"id": "default", "label": "",        "color_key": "default"},
+               {"id": "failure", "label": "Failure", "color_key": "failure"}]},
+
+    {"id": "schedule-callback", "display": "Schedule Callback",
+     "subtitle": "scheduled-callback",
+     "style_key": "action", "variable": False, "entry": True,
+     "exits": [{"id": "default", "label": "",        "color_key": "default"},
+               {"id": "failure", "label": "Failure", "color_key": "failure"}]},
+
+    {"id": "upload-audio", "display": "Upload Audio", "subtitle": "upload-audio",
+     "style_key": "action", "variable": False, "entry": True,
+     "exits": [{"id": "default", "label": "",      "color_key": "default"},
+               {"id": "error",   "label": "Error", "color_key": "error"}]},
+
+    # ── Gateways – fixed exits ─────────────────────────────────────────────────
+    {"id": "condition", "display": "Condition", "subtitle": "condition-activity",
+     "style_key": "gateway", "variable": False, "entry": True,
+     "exits": [{"id": "true",  "label": "",      "color_key": "true"},
+               {"id": "false", "label": "False", "color_key": "false"},
+               {"id": "error", "label": "Error", "color_key": "error"}]},
+
+    {"id": "business-hours", "display": "Business Hours", "subtitle": "business-hours",
+     "style_key": "gateway", "variable": False, "entry": True,
+     "exits": [{"id": "workingHours", "label": "",         "color_key": "workingHours"},
+               {"id": "holidays",     "label": "Holidays", "color_key": "holidays"},
+               {"id": "override",     "label": "Override", "color_key": "override"},
+               {"id": "default",      "label": "Default",  "color_key": "info"},
+               {"id": "error",        "label": "Error",    "color_key": "error"}]},
+
+    {"id": "virtual-agent", "display": "Virtual Agent",
+     "subtitle": "ivr-virtualassistant",
+     "style_key": "gateway", "variable": False, "entry": True,
+     "exits": [{"id": "ENDED",   "label": "Handled",   "color_key": "ENDED"},
+               {"id": "ESCALATE","label": "Escalated", "color_key": "ESCALATE"},
+               {"id": "error",   "label": "Error",     "color_key": "error"}]},
+
+    {"id": "virtual-agent-v2", "display": "Virtual Agent V2",
+     "subtitle": "ivr-virtualassistantvoice",
+     "style_key": "gateway", "variable": False, "entry": True,
+     "exits": [{"id": "ENDED",   "label": "Handled",   "color_key": "ENDED"},
+               {"id": "ESCALATE","label": "Escalated", "color_key": "ESCALATE"},
+               {"id": "error",   "label": "Error",     "color_key": "error"}]},
+
+    # ── Gateways – variable exits ──────────────────────────────────────────────
+    {"id": "menu", "display": "Menu", "subtitle": "ivr-menu",
+     "style_key": "gateway", "variable": True, "entry": True,
+     "variable_type": "menu",
+     "default_exits": ["Option 0", "Option 1", "Option 2"],
+     "error_exits": [
+         {"id": "timeout", "label": "No-Input Timeout", "color_key": "timeout"},
+         {"id": "invalid", "label": "Unmatched Entry",  "color_key": "invalid"},
+         {"id": "error",   "label": "Undefined Error",  "color_key": "error"},
+     ]},
+
+    {"id": "case", "display": "Case", "subtitle": "case-statement",
+     "style_key": "gateway", "variable": True, "entry": True,
+     "variable_type": "case",
+     "default_exits": ["Case 1", "Case 2", "Case 3"],
+     "error_exits": [
+         {"id": "default", "label": "Default", "color_key": "info"},
+         {"id": "error",   "label": "Error",   "color_key": "error"},
+     ]},
+
+    {"id": "percent-allocation", "display": "% Allocation",
+     "subtitle": "percent-allocation",
+     "style_key": "gateway", "variable": True, "entry": True,
+     "variable_type": "percent",
+     "default_exits": ["Path 1 (50%)", "Path 2 (50%)"],
+     "error_exits": [
+         {"id": "error", "label": "Error", "color_key": "error"},
+     ]},
+
+    {"id": "feedback-v2", "display": "Feedback V2", "subtitle": "Feedback-V2",
+     "style_key": "action", "variable": False, "entry": True,
+     "exits": [{"id": "error", "label": "Error", "color_key": "error"}]},
+
+    {"id": "cryptographic-hash", "display": "Cryptographic Hash",
+     "subtitle": "cryptographic-hash",
+     "style_key": "action", "variable": False, "entry": True,
+     "exits": [{"id": "error", "label": "Error", "color_key": "error"}]},
+
+    {"id": "generate-otp", "display": "Generate OTP", "subtitle": "generate-otp",
+     "style_key": "action", "variable": False, "entry": True,
+     "exits": [{"id": "error", "label": "Error", "color_key": "error"}]},
+
+    {"id": "verify-otp", "display": "Verify OTP", "subtitle": "verify-otp",
+     "style_key": "action", "variable": False, "entry": True,
+     "exits": [{"id": "error",   "label": "Error",   "color_key": "error"},
+               {"id": "failure", "label": "Failure", "color_key": "failure"}]},
+
+    # ── Terminating ────────────────────────────────────────────────────────────
+    {"id": "blind-transfer", "display": "Blind Transfer", "subtitle": "blind-transfer",
+     "style_key": "terminating", "variable": False, "entry": True,
+     "exits": [{"id": "failure", "label": "Failure", "color_key": "failure"}]},
+
+    {"id": "disconnect-contact", "display": "Disconnect Contact",
+     "subtitle": "disconnect-contact",
+     "style_key": "terminating", "variable": False, "entry": True,
+     "exits": []},
+
+    {"id": "end-subflow", "display": "End Subflow", "subtitle": "end-subflow",
+     "style_key": "terminating", "variable": False, "entry": True,
+     "exits": []},
+
+    # ── End nodes ──────────────────────────────────────────────────────────────
+    {"id": "end-flow", "display": "End Flow", "subtitle": "end",
+     "style_key": "end", "variable": False, "entry": True,
+     "exits": []},
+
+    {"id": "goto", "display": "GoTo", "subtitle": "hand-off",
+     "style_key": "end", "variable": False, "entry": True,
+     "exits": [{"id": "error", "label": "Error", "color_key": "error"}]},
+]
+
+
+# ── HTML / XML helpers ────────────────────────────────────────────────────────
+
+def _esc(s: str) -> str:
+    return html_mod.escape(str(s))
+
+def _xa(s: str) -> str:
+    return html_mod.escape(str(s), quote=True)
+
+
+# ── Header HTML ───────────────────────────────────────────────────────────────
+
+def _header_html(node: dict) -> str:
+    """Build the HTML rendered inside the swimlane startSize header area."""
+    cat        = CAT[node["style_key"]]
+    badge_fill = cat["badge_fill"]
+    badge_arc  = cat["badge_arc"]
+    border_radius = "50%" if badge_arc >= 50 else f"{max(2, round(36 * badge_arc / 100))}px"
+    display  = _esc(node["display"])
+    subtitle = _esc(node["subtitle"])
+    icon_uri = _fetch_icon(node["id"])
+
+    badge_css = (
+        f"width:36px;height:36px;border-radius:{border_radius};"
+        f"background-color:{badge_fill};"
+    )
+    if icon_uri:
+        badge_css += (
+            f"background-image:url('{icon_uri}');"
+            "background-size:22px 22px;"
+            "background-position:center center;"
+            "background-repeat:no-repeat;"
+        )
+
+    return (
+        '<table width="100%" cellpadding="0" cellspacing="0" border="0" '
+        'style="border-collapse:collapse;font-family:Helvetica Neue,Arial,sans-serif;">'
+        '<tr>'
+        '<td width="46" valign="middle" style="padding-left:10px;">'
+        f'<div style="{badge_css}"></div>'
+        '</td>'
+        '<td valign="middle" style="padding-left:8px;">'
+        f'<b style="font-size:13px;color:#111827;">{display}</b><br/>'
+        f'<span style="font-size:11px;color:#6b7280;">{subtitle}</span>'
+        '</td>'
+        '</tr>'
+        '</table>'
+    )
+
+
+# ── Section / row builders ────────────────────────────────────────────────────
+
+def _get_sections(node: dict) -> list:
+    """Return list of section dicts: {label, rows: [(label, row_type)], collapsed}
+    row_type: 'exit' | 'details'
+    """
+    sections = [
+        {"label": "Details", "rows": [("", "details")], "collapsed": True},
+    ]
+
+    if node["variable"]:
+        vtype     = node.get("variable_type", "")
+        sec_label = {"menu": "Options", "case": "Cases", "percent": "Allocations"}.get(vtype, "Exits")
+        sections.append({
+            "label":     sec_label,
+            "rows":      [(lbl, "exit") for lbl in node.get("default_exits", [])],
+            "collapsed": False,
+        })
+        err_exits = node.get("error_exits", [])
+        if err_exits:
+            sections.append({
+                "label":     "Error handling",
+                "rows":      [(ex["label"], "exit") for ex in err_exits],
+                "collapsed": False,
+            })
+    else:
+        exits   = node.get("exits", [])
+        primary = [e for e in exits if e["id"] in PRIMARY_EXIT_IDS]
+        errors  = [e for e in exits if e["id"] not in PRIMARY_EXIT_IDS]
+        exit_rows = []
+        for ex in primary:
+            lbl = ex["label"] or PRIMARY_EXIT_LABEL.get(ex["id"], ex["id"].capitalize())
+            exit_rows.append((lbl, "exit"))
+        for ex in errors:
+            lbl = ex["label"] or ex["id"].capitalize()
+            exit_rows.append((lbl, "exit"))
+        if exit_rows:
+            sections.append({"label": "Connections", "rows": exit_rows, "collapsed": False})
+
+    return sections
+
+
+def _section_content_h(sec: dict) -> int:
+    """Height of a section's content rows (excluding the section header)."""
+    return sum(DETAILS_H if rt == "details" else ROW_H for _, rt in sec["rows"])
+
+
+def _section_total_h(sec: dict) -> int:
+    """Total height of a section cell: header + content (or just header if collapsed)."""
+    return ROW_H if sec["collapsed"] else ROW_H + _section_content_h(sec)
+
+
+# ── Cell XML builders ─────────────────────────────────────────────────────────
+
+def _swimlane_container(cid: str, value_html: str, h: int, hdr_bg: str, entry_y: float) -> str:
+    pts = json.dumps([[0, entry_y]], separators=(",", ":"))
+    style = (
+        f"swimlane;fontStyle=0;childLayout=stackLayout;horizontal=1;"
+        f"startSize={HDR_H};horizontalStack=0;resizeParent=1;resizeParentMax=0;"
+        f"resizeLast=0;collapsible=1;marginBottom=0;whiteSpace=wrap;html=1;"
+        f"shadow=1;rounded=1;arcSize=3;align=left;"
+        f"fillColor={hdr_bg};strokeColor=#d1d5db;swimlaneFillColor=#ffffff;"
+        f"points={pts};portConstraint=fixed;"
+    )
+    return (
+        f'<mxCell id="{cid}" value="{_xa(value_html)}" style="{_xa(style)}"'
+        f' vertex="1" parent="1">'
+        f'<mxGeometry x="0" y="0" width="{CARD_W}" height="{h}" as="geometry"/>'
+        f'</mxCell>'
+    )
+
+
+def _section_cell(cid: str, parent_id: str, label: str, y: int, h: int, collapsed: bool) -> str:
+    style = (
+        f"swimlane;fontStyle=1;fontSize=11;childLayout=stackLayout;horizontal=1;"
+        f"startSize={ROW_H};horizontalStack=0;resizeParent=1;resizeParentMax=0;"
+        f"resizeLast=0;collapsible=1;marginBottom=0;whiteSpace=wrap;html=1;"
+        f"fillColor=#f3f4f6;strokeColor=none;swimlaneFillColor=#ffffff;align=left;"
+        f"points=[];"
+    )
+    collapsed_attr = ' collapsed="1"' if collapsed else ''
+    return (
+        f'<mxCell id="{cid}" value="{_xa(label)}" style="{_xa(style)}"'
+        f' vertex="1"{collapsed_attr} parent="{parent_id}">'
+        f'<mxGeometry x="0" y="{y}" width="{CARD_W}" height="{h}" as="geometry"/>'
+        f'</mxCell>'
+    )
+
+
+def _row_cell(cid: str, parent_id: str, label: str, y: int, row_type: str = "exit") -> str:
+    if row_type == "details":
+        style = (
+            "text;strokeColor=#d1d5db;fillColor=none;"
+            "align=left;verticalAlign=top;whiteSpace=wrap;"
+            "spacingLeft=8;spacingRight=8;spacingTop=6;fontSize=8;rotatable=0;"
+            "fontColor=#000000;"
+        )
+        connectable, width, height = "0", CARD_W, DETAILS_H
+    else:
+        style = (
+            "text;strokeColor=none;fillColor=none;"
+            "align=left;verticalAlign=middle;"
+            "spacingLeft=8;spacingRight=4;fontSize=11;rotatable=0;"
+            "points=[[1,0.5]];portConstraint=fixed;"
+        )
+        connectable, width, height = "1", CARD_W, ROW_H
+    return (
+        f'<mxCell id="{cid}" value="{_xa(label)}" style="{_xa(style)}"'
+        f' vertex="1" connectable="{connectable}" parent="{parent_id}">'
+        f'<mxGeometry x="0" y="{y}" width="{width}" height="{height}" as="geometry"/>'
+        f'</mxCell>'
+    )
+
+
+# ── Node assembler ────────────────────────────────────────────────────────────
+
+def build_node(node: dict) -> tuple:
+    sections = _get_sections(node)
+    h = HDR_H + sum(_section_total_h(s) for s in sections)
+
+    cat         = CAT[node["style_key"]]
+    header_html = _header_html(node)
+    entry_y     = round((HDR_H / 2) / h, 3)
+
+    container_id = "2"
+    cells = _swimlane_container(container_id, header_html, h, cat["header_bg"], entry_y)
+
+    cid   = 3
+    sec_y = HDR_H
+    for sec in sections:
+        sec_h = _section_total_h(sec)
+        cells += _section_cell(str(cid), container_id, "&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;" + sec["label"], sec_y, sec_h, sec["collapsed"])
+        sec_parent = str(cid)
+        cid   += 1
+        row_y  = ROW_H  # relative to section parent (below its own header)
+        for label, row_type in sec["rows"]:
+            cells += _row_cell(str(cid), sec_parent, label, row_y, row_type)
+            cid   += 1
+            row_y += DETAILS_H if row_type == "details" else ROW_H
+        sec_y += sec_h
+
+    return cells, CARD_W, h
+
+
+# ── Compression & output ───────────────────────────────────────────────────────
+
+def _compress(xml: str) -> str:
+    url_enc      = urllib.parse.quote(xml, safe='')
+    raw_deflated = zlib.compress(url_enc.encode('utf-8'), level=9)[2:-4]
+    return base64.b64encode(raw_deflated).decode('ascii')
+
+
+def _wrap(cells: str) -> str:
+    return (
+        '<mxGraphModel><root>'
+        '<mxCell id="0"/><mxCell id="1" parent="0"/>'
+        + cells
+        + '</root></mxGraphModel>'
+    )
+
+
+def generate(output_path: str) -> None:
+    items = []
+    for node in NODES:
+        cells, w, h = build_node(node)
+        items.append({
+            "title":  node["display"],
+            "w":      w,
+            "h":      h,
+            "aspect": "fixed",
+            "xml":    _compress(_wrap(cells)),
+        })
+        print(f"  ✓  {node['display']:35s}  {w}\xd7{h}")
+
+    lib = f"<mxlibrary>{json.dumps(items, separators=(',', ':'))}</mxlibrary>"
+    with open(output_path, "w", encoding="utf-8") as f:
+        f.write(lib)
+    print(f"\nWrote {len(items)} shapes → {output_path}")
+
+
+if __name__ == "__main__":
+    out = sys.argv[1] if len(sys.argv) > 1 else "WxCC-FlowBuilder-Activities.xml"
+    print(f"Generating WxCC draw.io library → {out}\n")
+    generate(out)
