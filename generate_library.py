@@ -12,6 +12,7 @@ Architecture: swimlane + childLayout=stackLayout
 Output: WxCC-Nodes.xml — import via File > Open Library from > This Device
 """
 
+import argparse
 import base64
 import html as html_mod
 import json
@@ -19,10 +20,13 @@ import re
 import subprocess
 import sys
 import urllib.parse
+import urllib.request
 import zlib
 from pathlib import Path
 
-MOMENTUM = str(Path.home() / ".local/bin/momentum")
+MOMENTUM   = str(Path.home() / ".local/bin/momentum")
+PROJECT_ID = "5e5c9ad6d61f870d6d778c1b"
+API_BASE   = "https://api.wxcc-us1.cisco.com"
 
 CARD_W    = 230
 HDR_H     = 56   # swimlane startSize (badge 36px + 10px pad top + 10px pad bottom)
@@ -765,7 +769,146 @@ def generate(output_path: str) -> None:
     print(f"\nWrote {len(items)} shapes → {output_path}")
 
 
+# ── API discovery ─────────────────────────────────────────────────────────────
+
+def _org_from_token(token: str) -> str:
+    """Extract the org ID from a WxCC bearer token (last _-delimited segment)."""
+    return token.split("_")[-1]
+
+
+def _ssl_ctx():
+    import ssl
+    try:
+        import certifi
+        return ssl.create_default_context(cafile=certifi.where())
+    except ImportError:
+        pass
+    ctx = ssl.create_default_context()
+    # On macOS, Python may not have the system cert bundle installed.
+    # If this raises SSLCertVerificationError, run:
+    #   /Applications/Python\ 3.x/Install\ Certificates.command
+    # or:  pip install certifi
+    return ctx
+
+
+def _api_get(path: str, token: str) -> object:
+    url = f"{API_BASE}{path}"
+    req = urllib.request.Request(url, headers={"Authorization": f"Bearer {token}"})
+    try:
+        with urllib.request.urlopen(req, timeout=15, context=_ssl_ctx()) as resp:
+            return json.loads(resp.read())
+    except urllib.error.HTTPError as e:
+        print(f"  HTTP {e.code} from {url}", file=sys.stderr)
+        raise
+
+
+def fetch_api_activities(token: str) -> list:
+    org = _org_from_token(token)
+    return _api_get(f"/{org}/project/{PROJECT_ID}/v2/activities", token)
+
+
+def fetch_api_events(token: str) -> list:
+    org = _org_from_token(token)
+    data = _api_get(f"/{org}/project/{PROJECT_ID}/v2/event-specifications", token)
+    return data.get("specifications", data) if isinstance(data, dict) else data
+
+
+def diff_api(token: str) -> None:
+    """Fetch live activity/event lists and report gaps vs the NODES catalog."""
+
+    # Internal-only activity names that are not user-facing flow nodes
+    INTERNAL_ACTIVITIES = {"NewSubFlowStart", "Event", "NewContact"}
+
+    # Library subtitle → API activityName aliases where the names differ,
+    # or subtitles to suppress from the stale check (platform-level nodes).
+    SUBTITLE_ALIASES = {
+        "fn-activity": "function",   # Function node — platform-level, not in activity API
+    }
+    # Additional subtitles never returned by the activity API
+    SKIP_STALE = {"fn-activity"}
+
+    # Event spec names we deliberately omit (internal/test or covered by other nodes)
+    INTERNAL_EVENTS = {
+        "TestEventPleaseDelete",
+        "ContactDelete",
+        "ContactStartWorkflow",             # represented as Start Flow node
+        "FCAsk(ContactLastAgentRemoved)",   # variant of Last Agent Removed
+    }
+
+    print("Fetching activities from API…")
+    activities = fetch_api_activities(token)
+    events     = fetch_api_events(token)
+    print(f"  API returned {len(activities)} activities, {len(events)} events\n")
+
+    # --- Activity diff (non-event nodes only) ---
+    lib_activity_subtitles = {
+        n["subtitle"] for n in NODES if n["style_key"] != "event"
+    }
+    missing_activities = [
+        a for a in activities
+        if a["activityName"] not in lib_activity_subtitles
+        and a["activityName"] not in INTERNAL_ACTIVITIES
+    ]
+    if missing_activities:
+        print(f"⚠  {len(missing_activities)} API activities not in library:")
+        for a in missing_activities:
+            ports = [(p["condition"], "ERR" if p.get("isErrorPath") else "OK")
+                     for p in a.get("outputPorts", [])]
+            print(f"   {a['activityName']:35s} [{a['group']}]  ports={ports}")
+    else:
+        print("✓  All API activities are represented in the library.")
+
+    # Library action nodes whose subtitle doesn't appear in the API
+    api_names = {a["activityName"] for a in activities}
+    stale = [
+        n for n in NODES
+        if n["style_key"] not in {"event", "start", "end"}
+        and n["subtitle"] not in api_names
+        and SUBTITLE_ALIASES.get(n["subtitle"], n["subtitle"]) not in api_names
+        and n["subtitle"] not in SKIP_STALE
+    ]
+    if stale:
+        print(f"\n⚠  {len(stale)} library nodes not found in API (possibly renamed/removed):")
+        for n in stale:
+            print(f"   {n['id']:35s} subtitle={n['subtitle']}")
+
+    # --- Event spec diff ---
+    lib_event_subtitles = {n["subtitle"] for n in NODES if n["style_key"] == "event"}
+    api_event_names     = {e["eventSpecificationName"] for e in events}
+    missing_events = api_event_names - lib_event_subtitles - INTERNAL_EVENTS
+    if missing_events:
+        print(f"\n⚠  {len(missing_events)} API events not in library:")
+        for e in sorted(missing_events):
+            print(f"   {e}")
+    else:
+        print("\n✓  All API events are represented in the library.")
+    print()
+
+
+# ── Entry point ───────────────────────────────────────────────────────────────
+
 if __name__ == "__main__":
-    out = sys.argv[1] if len(sys.argv) > 1 else "WxCC-FlowBuilder-Activities.xml"
-    print(f"Generating WxCC draw.io library → {out}\n")
-    generate(out)
+    parser = argparse.ArgumentParser(
+        description="Generate WxCC draw.io shape library.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Examples:\n"
+            "  python3 generate_library.py\n"
+            "  python3 generate_library.py --token <bearer_token>\n"
+            "  python3 generate_library.py out.xml --token <bearer_token>\n"
+        ),
+    )
+    parser.add_argument("output", nargs="?", default="WxCC-FlowBuilder-Activities.xml",
+                        help="Output .xml path (default: WxCC-FlowBuilder-Activities.xml)")
+    parser.add_argument("--token", "-t", metavar="BEARER_TOKEN",
+                        help="WxCC bearer token — fetches live activities and diffs against library")
+    args = parser.parse_args()
+
+    if args.token:
+        org = _org_from_token(args.token)
+        print(f"Org ID : {org}")
+        print(f"Project: {PROJECT_ID}\n")
+        diff_api(args.token)
+
+    print(f"Generating WxCC draw.io library → {args.output}\n")
+    generate(args.output)
