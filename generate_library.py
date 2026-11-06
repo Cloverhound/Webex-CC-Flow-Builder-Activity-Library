@@ -121,6 +121,12 @@ ICON_MAP = {
     "disconnect-contact":       ("call-private",         "bold"),
     "end-flow":                 ("error-legacy",         "bold"),
     "goto":                     ("forward-message",      "bold"),
+    "receive-message":          ("chat-active",          "bold"),
+    "send-chat":                ("chat",                 "bold"),
+    "send-email":               ("email",                "bold"),
+    "send-sms":                 ("sms",                  "bold"),
+    "send-custom-message":      ("message",              "bold"),
+    "set-customer-identity":    ("assign-host",          "bold"),
 }
 
 _icon_cache: dict = {}
@@ -455,6 +461,37 @@ NODES = [
      "error_exits": [
          {"id": "error", "label": "Error", "color_key": "error"},
      ]},
+
+    # ── Digital / Omnichannel ──────────────────────────────────────────────────
+    {"id": "receive-message", "display": "Receive Message", "subtitle": "ReceiveMessage",
+     "style_key": "action", "variable": False, "entry": True,
+     "exits": [{"id": "timeout", "label": "Timeout", "color_key": "timeout"},
+               {"id": "error",   "label": "Error",   "color_key": "error"}]},
+
+    {"id": "send-chat", "display": "Send Chat", "subtitle": "SendChat",
+     "style_key": "action", "variable": False, "entry": True,
+     "exits": [{"id": "timeout", "label": "Timeout", "color_key": "timeout"},
+               {"id": "error",   "label": "Error",   "color_key": "error"}]},
+
+    {"id": "send-email", "display": "Send Email", "subtitle": "SendEmail",
+     "style_key": "action", "variable": False, "entry": True,
+     "exits": [{"id": "timeout", "label": "Timeout", "color_key": "timeout"},
+               {"id": "error",   "label": "Error",   "color_key": "error"}]},
+
+    {"id": "send-sms", "display": "Send SMS", "subtitle": "SendSMS",
+     "style_key": "action", "variable": False, "entry": True,
+     "exits": [{"id": "timeout", "label": "Timeout", "color_key": "timeout"},
+               {"id": "error",   "label": "Error",   "color_key": "error"}]},
+
+    {"id": "send-custom-message", "display": "Send Custom Message",
+     "subtitle": "SendCustomMessage",
+     "style_key": "action", "variable": False, "entry": True,
+     "exits": [{"id": "error", "label": "Error", "color_key": "error"}]},
+
+    {"id": "set-customer-identity", "display": "Set Customer Identity",
+     "subtitle": "SetCustomerIdentity",
+     "style_key": "action", "variable": False, "entry": True,
+     "exits": [{"id": "error", "label": "Error", "color_key": "error"}]},
 
     {"id": "feedback-v2", "display": "Feedback V2", "subtitle": "Feedback-V2",
      "style_key": "action", "variable": False, "entry": True,
