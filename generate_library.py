@@ -596,16 +596,22 @@ def _header_html(node: dict) -> str:
             "background-repeat:no-repeat;"
         )
 
+    # table-layout:fixed is required for text-overflow:ellipsis to work in TD cells
     return (
         '<table width="100%" cellpadding="0" cellspacing="0" border="0" '
-        'style="border-collapse:collapse;font-family:Helvetica Neue,Arial,sans-serif;">'
+        'style="border-collapse:collapse;font-family:Helvetica Neue,Arial,sans-serif;'
+        'table-layout:fixed;overflow:hidden;">'
         '<tr>'
-        '<td width="46" valign="middle" style="padding-left:10px;">'
+        '<td width="56" valign="middle" style="padding-left:10px;flex-shrink:0;">'
         f'<div style="{badge_css}"></div>'
         '</td>'
-        '<td valign="middle" style="padding-left:8px;">'
-        f'<b style="font-size:13px;color:#111827;">{display}</b><br/>'
-        f'<span style="font-size:11px;color:#6b7280;">{subtitle}</span>'
+        '<td valign="middle" style="padding-left:8px;overflow:hidden;min-width:0;">'
+        f'<b style="font-size:13px;color:#111827;display:block;'
+        f'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" '
+        f'title="{_xa(node["display"])}">{display}</b>'
+        f'<span style="font-size:11px;color:#6b7280;display:block;'
+        f'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" '
+        f'title="{_xa(node["subtitle"])}">{subtitle}</span>'
         '</td>'
         '</tr>'
         '</table>'
@@ -718,7 +724,8 @@ def _section_total_h(sec: dict) -> int:
 
 # ── Cell XML builders ─────────────────────────────────────────────────────────
 
-def _swimlane_container(cid: str, value_html: str, h: int, hdr_bg: str, entry_y: float) -> str:
+def _swimlane_container(cid: str, value_html: str, h: int, hdr_bg: str, entry_y: float,
+                        tooltip: str = "") -> str:
     pts = json.dumps([[0, entry_y]], separators=(",", ":"))
     style = (
         f"swimlane;fontStyle=0;childLayout=stackLayout;horizontal=1;"
@@ -728,9 +735,10 @@ def _swimlane_container(cid: str, value_html: str, h: int, hdr_bg: str, entry_y:
         f"fillColor={hdr_bg};strokeColor=#d1d5db;swimlaneFillColor=#ffffff;"
         f"points={pts};portConstraint=fixed;"
     )
+    tooltip_attr = f' tooltip="{_xa(tooltip)}"' if tooltip else ""
     return (
         f'<mxCell id="{cid}" value="{_xa(value_html)}" style="{_xa(style)}"'
-        f' vertex="1" parent="1">'
+        f'{tooltip_attr} vertex="1" parent="1">'
         f'<mxGeometry x="0" y="0" width="{CARD_W}" height="{h}" as="geometry"/>'
         f'</mxCell>'
     )
@@ -797,7 +805,8 @@ def build_node(node: dict, api_inputs: list = None) -> tuple:
     entry_y     = round((HDR_H / 2) / h, 3)
 
     container_id = "2"
-    cells = _swimlane_container(container_id, header_html, h, cat["header_bg"], entry_y)
+    tooltip = f"{node['display']} ({node['subtitle']})"
+    cells = _swimlane_container(container_id, header_html, h, cat["header_bg"], entry_y, tooltip)
 
     cid   = 3
     sec_y = HDR_H
