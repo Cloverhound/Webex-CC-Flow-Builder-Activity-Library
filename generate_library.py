@@ -624,9 +624,10 @@ _DETAILS_ROW_PX  = 15   # px per input field row
 _DETAILS_HEAD_PX = 20   # px for the table header row
 _DETAILS_PAD_PX  = 8    # top+bottom padding inside the details cell
 
-def _build_inputs_html(inputs: list) -> tuple:
-    """Return (html_string, height_px) for a Details cell given an API inputs list.
+def _build_inputs_html(inputs: list, outputs: list = None) -> tuple:
+    """Return (html_string, height_px) for a Details cell given API inputs (and outputs).
     Flattens top-level inputs and their immediate children (depth-1 only).
+    Outputs, when present, are rendered as a second table below the inputs.
     """
     flat = []
     for inp in inputs:
@@ -635,6 +636,9 @@ def _build_inputs_html(inputs: list) -> tuple:
             flat.append((child["name"], child["type"], child.get("required", False), 1))
 
     h = _DETAILS_HEAD_PX + len(flat) * _DETAILS_ROW_PX + _DETAILS_PAD_PX
+    outs = [(o["name"], o.get("type", "")) for o in (outputs or [])]
+    if outs:
+        h += 6 + _DETAILS_HEAD_PX + len(outs) * _DETAILS_ROW_PX
     h = max(h, DETAILS_H)
 
     rows_html = ""
@@ -660,6 +664,20 @@ def _build_inputs_html(inputs: list) -> tuple:
         + rows_html
         + "</table>"
     )
+    if outs:
+        out_rows = "".join(
+            f'<tr><td style="padding:1px 3px;">{_esc(n)}</td>'
+            f'<td style="padding:1px 3px;color:#6b7280;">{_esc(t)}</td></tr>'
+            for n, t in outs
+        )
+        html += (
+            '<table width="100%" cellpadding="0" cellspacing="0" border="0" '
+            'style="border-collapse:collapse;font-family:Arial,sans-serif;font-size:9px;margin-top:6px;">'
+            '<tr style="background-color:#f3f4f6;">'
+            '<td style="font-weight:bold;padding:2px 3px;border-bottom:1px solid #e5e7eb;">Output</td>'
+            '<td style="font-weight:bold;padding:2px 3px;border-bottom:1px solid #e5e7eb;">Type</td>'
+            '</tr>' + out_rows + '</table>'
+        )
     return html, h
 
 
@@ -681,14 +699,14 @@ def _build_event_html(ev: dict) -> tuple:
     return html, max(len(rows) * _DETAILS_ROW_PX + _DETAILS_PAD_PX, DETAILS_H)
 
 
-def _get_sections(node: dict, api_inputs: list = None, api_event: dict = None) -> list:
+def _get_sections(node: dict, api_inputs: list = None, api_event: dict = None, api_outputs: list = None) -> list:
     """Return list of section dicts: {label, rows: [(label, row_type)], collapsed, details_h}
     row_type: 'exit_normal' | 'exit_error' | 'exit_timeout' | 'details'
     """
     if api_event is not None:
         details_html, details_h = _build_event_html(api_event)
     elif api_inputs is not None:
-        details_html, details_h = _build_inputs_html(api_inputs)
+        details_html, details_h = _build_inputs_html(api_inputs, api_outputs)
     else:
         details_html, details_h = "", DETAILS_H
 
@@ -816,8 +834,8 @@ def _row_cell(cid: str, parent_id: str, label: str, y: int, row_type: str = "exi
 
 # ── Node assembler ────────────────────────────────────────────────────────────
 
-def build_node(node: dict, api_inputs: list = None, api_event: dict = None) -> tuple:
-    sections = _get_sections(node, api_inputs, api_event)
+def build_node(node: dict, api_inputs: list = None, api_event: dict = None, api_outputs: list = None) -> tuple:
+    sections = _get_sections(node, api_inputs, api_event, api_outputs)
     h = HDR_H + sum(_section_total_h(s) for s in sections)
 
     cat         = CAT[node["style_key"]]
@@ -906,13 +924,15 @@ def generate(output_path: str, api_data: dict = None, api_events: dict = None) -
     print("\n  Nodes:")
     for node in NODES:
         api_inputs = None
+        api_outputs = None
         if api_data:
             activity = api_data.get(node["subtitle"])
             if activity:
                 api_inputs = activity.get("inputs", [])
+                api_outputs = activity.get("outputs", [])
         ev_key = EVENT_API_ALIASES.get(node["subtitle"], node["subtitle"])
         api_event = (api_events or {}).get(ev_key) if node["style_key"] == "event" else None
-        cells, w, h = build_node(node, api_inputs, api_event)
+        cells, w, h = build_node(node, api_inputs, api_event, api_outputs)
         items.append({
             "title":  node["display"],
             "w":      w,
