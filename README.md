@@ -116,9 +116,9 @@ Use **View > Connection Points** to display all ports while editing.
 
 Variable-exit nodes (Menu, Case, % Allocation) support editable exit rows:
 
-- **Add a row** — right-click the node and select **Add Row**, or duplicate an existing row.
-- **Remove a row** — select the row and press Delete. The layout reflows automatically.
-- **Rename a row** — double-click the row label and type the new name.
+- **Add a row**: right-click the node and select **Add Row**, or duplicate an existing row.
+- **Remove a row**: select the row and press Delete. The layout reflows automatically.
+- **Rename a row**: double-click the row label and type the new name.
 
 Fixed-exit nodes have pre-defined exits that match the WxCC designer. Avoid deleting these unless the exit does not apply to your flow.
 
