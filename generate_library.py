@@ -632,7 +632,7 @@ _TH   = 'font-weight:bold;padding:2px 3px;border-bottom:1px solid #e5e7eb;'
 # Value row sits under each field and spans every column.
 _VALUE_ROW = ('<tr><td colspan="{n}" style="padding:2px 3px 2px 6px;' + _WRAP +
               'background-color:#eef5fd;border-left:2px solid #1170cf;color:#111827;">'
-              '<span style="color:#1170cf;font-weight:bold;">&gt;</span>&nbsp;</td></tr>')
+              '&nbsp;</td></tr>')
 
 
 def _build_inputs_html(inputs: list, outputs: list = None) -> tuple:
@@ -774,14 +774,16 @@ COLLAPSE_CARDS = True   # library tiles show only the title bar; click +/- on ca
 
 def _swimlane_container(cid: str, value_html: str, h: int, hdr_bg: str, entry_y: float,
                         tooltip: str = "") -> str:
-    pts = json.dumps([[0, entry_y]], separators=(",", ":"))
+    # [x, y, perimeter, dx, dy]: pin to the left edge at the header's vertical centre using an
+    # absolute offset, so the input stays on the icon row whether the card is collapsed or expanded.
+    pts = json.dumps([[0, 0, 0, 0, HDR_H // 2]], separators=(",", ":"))
     style = (
         f"swimlane;fontStyle=0;childLayout=stackLayout;horizontal=1;"
         f"startSize={HDR_H};horizontalStack=0;resizeParent=1;resizeParentMax=0;"
         f"resizeLast=0;collapsible=1;marginBottom=0;whiteSpace=wrap;html=1;"
         f"shadow=1;rounded=1;arcSize=3;align=left;"
         f"fillColor={hdr_bg};strokeColor=#d1d5db;swimlaneFillColor=#ffffff;"
-        f"points={pts};portConstraint=fixed;"
+        f"points={pts};portConstraint=west;"
     )
     tooltip_attr = f' tooltip="{_xa(tooltip)}"' if tooltip else ""
     if COLLAPSE_CARDS:
