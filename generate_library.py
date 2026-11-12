@@ -58,6 +58,29 @@ PRIMARY_EXIT_LABEL = {
     "success":      "Success",
 }
 
+# ── Connection-point dot styles (hollow = unconnected, colored by exit type) ──
+_TIMEOUT_COLOR_KEYS = {"timeout", "noInputTimeout", "invalid"}
+_ERROR_COLOR_KEYS   = {"error", "failure", "undefinedErrors", "insufficientdata"}
+
+def _dot_uri(fill: str, stroke: str) -> str:
+    svg = (
+        f"<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 8 8'>"
+        f"<circle cx='4' cy='4' r='3.5' fill='{fill}' stroke='{stroke}' stroke-width='1'/>"
+        f"</svg>"
+    )
+    return "data:image/svg+xml," + urllib.parse.quote(svg)
+
+_DOT_NORMAL  = _dot_uri("#ffffff", "#0353a8")  # hollow blue  — happy path
+_DOT_ERROR   = _dot_uri("#ffffff", "#ab0a15")  # hollow red   — error/failure
+_DOT_TIMEOUT = _dot_uri("#ffffff", "#7d4705")  # hollow brown — timeout
+
+def _exit_row_type(color_key: str) -> str:
+    if color_key in _TIMEOUT_COLOR_KEYS:
+        return "exit_timeout"
+    if color_key in _ERROR_COLOR_KEYS:
+        return "exit_error"
+    return "exit_normal"
+
 # ── Momentum icon map  node_id → (name, weight) ───────────────────────────────
 ICON_MAP = {
     "start-flow":               ("play-circle",          "bold"),
@@ -604,14 +627,14 @@ def _get_sections(node: dict) -> list:
         sec_label = {"menu": "Options", "case": "Cases", "percent": "Allocations"}.get(vtype, "Exits")
         sections.append({
             "label":     sec_label,
-            "rows":      [(lbl, "exit") for lbl in node.get("default_exits", [])],
+            "rows":      [(lbl, "exit_normal") for lbl in node.get("default_exits", [])],
             "collapsed": False,
         })
         err_exits = node.get("error_exits", [])
         if err_exits:
             sections.append({
                 "label":     "Error handling",
-                "rows":      [(ex["label"], "exit") for ex in err_exits],
+                "rows":      [(ex["label"], _exit_row_type(ex["color_key"])) for ex in err_exits],
                 "collapsed": False,
             })
     else:
@@ -621,10 +644,10 @@ def _get_sections(node: dict) -> list:
         exit_rows = []
         for ex in primary:
             lbl = ex["label"] or PRIMARY_EXIT_LABEL.get(ex["id"], ex["id"].capitalize())
-            exit_rows.append((lbl, "exit"))
+            exit_rows.append((lbl, _exit_row_type(ex["color_key"])))
         for ex in errors:
             lbl = ex["label"] or ex["id"].capitalize()
-            exit_rows.append((lbl, "exit"))
+            exit_rows.append((lbl, _exit_row_type(ex["color_key"])))
         if exit_rows:
             sections.append({"label": "Connections", "rows": exit_rows, "collapsed": False})
 
@@ -688,11 +711,15 @@ def _row_cell(cid: str, parent_id: str, label: str, y: int, row_type: str = "exi
         )
         connectable, width, height = "0", CARD_W, DETAILS_H
     else:
+        dot = {"exit_error": _DOT_ERROR, "exit_timeout": _DOT_TIMEOUT}.get(row_type, _DOT_NORMAL)
+        error_flag = ";wxccError=1" if row_type in {"exit_error", "exit_timeout"} else ""
         style = (
-            "text;strokeColor=none;fillColor=none;"
+            "label;strokeColor=none;fillColor=none;"
             "align=left;verticalAlign=middle;"
-            "spacingLeft=8;spacingRight=4;fontSize=11;rotatable=0;"
+            "spacingLeft=17;spacingRight=13;fontSize=11;rotatable=0;"
             "points=[[1,0.5]];portConstraint=fixed;"
+            f"image={dot};imageWidth=8;imageHeight=8;"
+            f"imageAlign=right;imageVerticalAlign=middle;spacing=-9;wxccDot=1{error_flag};"
         )
         connectable, width, height = "1", CARD_W, ROW_H
     return (
