@@ -133,7 +133,7 @@ ICON_MAP = {
     "virtual-agent":            ("headset",              "bold"),
     "virtual-agent-v2":         ("headset",              "bold"),
     "feedback-v2":              ("announcement",         "bold"),
-    "cryptographic-hash":       ("security",             "bold"),
+    "cryptographic-hash":       ("shield",               "bold"),
     "generate-otp":             ("display-input",        "bold"),
     "verify-otp":               ("check-circle",         "bold"),
     "end-subflow":              ("error-legacy",         "bold"),
@@ -148,11 +148,11 @@ ICON_MAP = {
     "disconnect-contact":       ("call-private",         "bold"),
     "end-flow":                 ("error-legacy",         "bold"),
     "goto":                     ("forward-message",      "bold"),
-    "receive-message":          ("chat-active",          "bold"),
+    "receive-message":          ("sms-inbound",          "bold"),
     "send-chat":                ("chat",                 "bold"),
     "send-email":               ("email",                "bold"),
-    "send-sms":                 ("sms",                  "bold"),
-    "send-custom-message":      ("message",              "bold"),
+    "send-sms":                 ("sms-message",          "bold"),
+    "send-custom-message":      ("commenting",           "bold"),
     "set-customer-identity":    ("assign-host",          "bold"),
 }
 
