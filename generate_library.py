@@ -854,6 +854,7 @@ def _edge_item(title: str, stroke: str) -> dict:
         f"rounded=1;orthogonalLoop=1;jettySize=auto;"
         f"edgeStyle=orthogonalEdgeStyle;"
         f"strokeColor={stroke};strokeWidth=2;fillColor=none;"
+        f"startArrow=oval;startFill=1;startSize=6;"
         f"endArrow=block;endFill=1;fontSize=11;"
     )
     xml = (
