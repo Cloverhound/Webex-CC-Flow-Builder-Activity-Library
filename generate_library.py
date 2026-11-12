@@ -663,11 +663,31 @@ def _build_inputs_html(inputs: list) -> tuple:
     return html, h
 
 
-def _get_sections(node: dict, api_inputs: list = None) -> list:
+def _build_event_html(ev: dict) -> tuple:
+    """Return (html, height_px) for an event node's Details cell from an event-spec record."""
+    rows = [("Source", ev.get("eventSourceName", "")),
+            ("Classification", ev.get("eventClassificationName", "")),
+            ("Event name", ev.get("eventSpecificationName", ""))]
+    body = "".join(
+        f'<tr><td style="padding:1px 3px;font-weight:bold;">{_esc(k)}</td>'
+        f'<td style="padding:1px 3px;color:#6b7280;">{_esc(v)}</td></tr>'
+        for k, v in rows
+    )
+    html = (
+        '<table width="100%" cellpadding="0" cellspacing="0" border="0" '
+        'style="border-collapse:collapse;font-family:Arial,sans-serif;font-size:9px;">'
+        + body + "</table>"
+    )
+    return html, max(len(rows) * _DETAILS_ROW_PX + _DETAILS_PAD_PX, DETAILS_H)
+
+
+def _get_sections(node: dict, api_inputs: list = None, api_event: dict = None) -> list:
     """Return list of section dicts: {label, rows: [(label, row_type)], collapsed, details_h}
     row_type: 'exit_normal' | 'exit_error' | 'exit_timeout' | 'details'
     """
-    if api_inputs is not None:
+    if api_event is not None:
+        details_html, details_h = _build_event_html(api_event)
+    elif api_inputs is not None:
         details_html, details_h = _build_inputs_html(api_inputs)
     else:
         details_html, details_h = "", DETAILS_H
@@ -796,8 +816,8 @@ def _row_cell(cid: str, parent_id: str, label: str, y: int, row_type: str = "exi
 
 # ── Node assembler ────────────────────────────────────────────────────────────
 
-def build_node(node: dict, api_inputs: list = None) -> tuple:
-    sections = _get_sections(node, api_inputs)
+def build_node(node: dict, api_inputs: list = None, api_event: dict = None) -> tuple:
+    sections = _get_sections(node, api_inputs, api_event)
     h = HDR_H + sum(_section_total_h(s) for s in sections)
 
     cat         = CAT[node["style_key"]]
@@ -843,6 +863,9 @@ def _wrap(cells: str) -> str:
     )
 
 
+# Library event subtitle → API eventSpecificationName where they differ
+EVENT_API_ALIASES = {"ContactLastAgentRemoved": "FCAsk(ContactLastAgentRemoved)"}
+
 _EDGE_CONNECTORS = [
     ("Normal Path",  "#1170cf"),
     ("Error Path",   "#ab0a15"),
@@ -871,8 +894,8 @@ def _edge_item(title: str, stroke: str) -> dict:
     return {"title": title, "w": 160, "h": 40, "xml": _compress(xml)}
 
 
-def generate(output_path: str, api_data: dict = None) -> None:
-    """api_data: optional dict keyed by activityName → full activity object from the API."""
+def generate(output_path: str, api_data: dict = None, api_events: dict = None) -> None:
+    """api_data: activityName → activity object; api_events: eventSpecificationName → event spec."""
     items = []
 
     print("  Connectors:")
@@ -887,7 +910,9 @@ def generate(output_path: str, api_data: dict = None) -> None:
             activity = api_data.get(node["subtitle"])
             if activity:
                 api_inputs = activity.get("inputs", [])
-        cells, w, h = build_node(node, api_inputs)
+        ev_key = EVENT_API_ALIASES.get(node["subtitle"], node["subtitle"])
+        api_event = (api_events or {}).get(ev_key) if node["style_key"] == "event" else None
+        cells, w, h = build_node(node, api_inputs, api_event)
         items.append({
             "title":  node["display"],
             "w":      w,
@@ -1039,6 +1064,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     api_data = None
+    api_events = None
     if args.token:
         org = _org_from_token(args.token)
         print(f"Org ID : {org}")
@@ -1047,7 +1073,8 @@ if __name__ == "__main__":
         print("Fetching activity inputs for field tables…")
         activities = fetch_api_activities(args.token)
         api_data = {a["activityName"]: a for a in activities}
-        print(f"  Loaded inputs for {len(api_data)} activities\n")
+        api_events = {e["eventSpecificationName"]: e for e in fetch_api_events(args.token)}
+        print(f"  Loaded inputs for {len(api_data)} activities, {len(api_events)} events\n")
 
     print(f"Generating WxCC draw.io library → {args.output}\n")
-    generate(args.output, api_data)
+    generate(args.output, api_data, api_events)
