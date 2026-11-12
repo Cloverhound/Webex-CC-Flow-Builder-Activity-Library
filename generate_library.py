@@ -614,12 +614,61 @@ def _header_html(node: dict) -> str:
 
 # ── Section / row builders ────────────────────────────────────────────────────
 
-def _get_sections(node: dict) -> list:
-    """Return list of section dicts: {label, rows: [(label, row_type)], collapsed}
-    row_type: 'exit' | 'details'
+_DETAILS_ROW_PX  = 15   # px per input field row
+_DETAILS_HEAD_PX = 20   # px for the table header row
+_DETAILS_PAD_PX  = 8    # top+bottom padding inside the details cell
+
+def _build_inputs_html(inputs: list) -> tuple:
+    """Return (html_string, height_px) for a Details cell given an API inputs list.
+    Flattens top-level inputs and their immediate children (depth-1 only).
     """
+    flat = []
+    for inp in inputs:
+        flat.append((inp["name"], inp["type"], inp.get("required", False), 0))
+        for child in inp.get("children", []):
+            flat.append((child["name"], child["type"], child.get("required", False), 1))
+
+    h = _DETAILS_HEAD_PX + len(flat) * _DETAILS_ROW_PX + _DETAILS_PAD_PX
+    h = max(h, DETAILS_H)
+
+    rows_html = ""
+    for name, typ, req, indent in flat:
+        pad = "&nbsp;&nbsp;" * indent
+        req_cell = '<span style="color:#059669;">&#x2713;</span>' if req else ""
+        rows_html += (
+            f"<tr>"
+            f'<td style="padding:1px 3px;">{pad}{_esc(name)}</td>'
+            f'<td style="padding:1px 3px;color:#6b7280;">{_esc(typ)}</td>'
+            f'<td style="padding:1px 3px;text-align:center;">{req_cell}</td>'
+            f"</tr>"
+        )
+
+    html = (
+        '<table width="100%" cellpadding="0" cellspacing="0" border="0" '
+        'style="border-collapse:collapse;font-family:Arial,sans-serif;font-size:9px;">'
+        '<tr style="background-color:#f3f4f6;">'
+        '<td style="font-weight:bold;padding:2px 3px;border-bottom:1px solid #e5e7eb;">Field</td>'
+        '<td style="font-weight:bold;padding:2px 3px;border-bottom:1px solid #e5e7eb;">Type</td>'
+        '<td style="font-weight:bold;padding:2px 3px;border-bottom:1px solid #e5e7eb;">Req</td>'
+        "</tr>"
+        + rows_html
+        + "</table>"
+    )
+    return html, h
+
+
+def _get_sections(node: dict, api_inputs: list = None) -> list:
+    """Return list of section dicts: {label, rows: [(label, row_type)], collapsed, details_h}
+    row_type: 'exit_normal' | 'exit_error' | 'exit_timeout' | 'details'
+    """
+    if api_inputs is not None:
+        details_html, details_h = _build_inputs_html(api_inputs)
+    else:
+        details_html, details_h = "", DETAILS_H
+
     sections = [
-        {"label": "Details", "rows": [("", "details")], "collapsed": True},
+        {"label": "Details", "rows": [(details_html, "details")],
+         "collapsed": True, "details_h": details_h},
     ]
 
     if node["variable"]:
@@ -656,7 +705,10 @@ def _get_sections(node: dict) -> list:
 
 def _section_content_h(sec: dict) -> int:
     """Height of a section's content rows (excluding the section header)."""
-    return sum(DETAILS_H if rt == "details" else ROW_H for _, rt in sec["rows"])
+    total = 0
+    for _, rt in sec["rows"]:
+        total += sec.get("details_h", DETAILS_H) if rt == "details" else ROW_H
+    return total
 
 
 def _section_total_h(sec: dict) -> int:
@@ -701,16 +753,20 @@ def _section_cell(cid: str, parent_id: str, label: str, y: int, h: int, collapse
     )
 
 
-def _row_cell(cid: str, parent_id: str, label: str, y: int, row_type: str = "exit") -> str:
+def _row_cell(cid: str, parent_id: str, label: str, y: int, row_type: str = "exit_normal",
+              height: int = None) -> str:
     if row_type == "details":
+        if height is None:
+            height = DETAILS_H
         style = (
             "text;strokeColor=#d1d5db;fillColor=none;"
-            "align=left;verticalAlign=top;whiteSpace=wrap;"
-            "spacingLeft=8;spacingRight=8;spacingTop=6;fontSize=8;rotatable=0;"
+            "align=left;verticalAlign=top;whiteSpace=wrap;html=1;"
+            "spacingLeft=4;spacingRight=4;spacingTop=4;fontSize=9;rotatable=0;"
             "fontColor=#000000;"
         )
-        connectable, width, height = "0", CARD_W, DETAILS_H
+        connectable, width = "0", CARD_W
     else:
+        height = ROW_H
         dot = {"exit_error": _DOT_ERROR, "exit_timeout": _DOT_TIMEOUT}.get(row_type, _DOT_NORMAL)
         error_flag = ";wxccError=1" if row_type in {"exit_error", "exit_timeout"} else ""
         style = (
@@ -721,7 +777,7 @@ def _row_cell(cid: str, parent_id: str, label: str, y: int, row_type: str = "exi
             f"image={dot};imageWidth=8;imageHeight=8;"
             f"imageAlign=right;imageVerticalAlign=middle;spacing=-9;wxccDot=1{error_flag};"
         )
-        connectable, width, height = "1", CARD_W, ROW_H
+        connectable, width = "1", CARD_W
     return (
         f'<mxCell id="{cid}" value="{_xa(label)}" style="{_xa(style)}"'
         f' vertex="1" connectable="{connectable}" parent="{parent_id}">'
@@ -732,8 +788,8 @@ def _row_cell(cid: str, parent_id: str, label: str, y: int, row_type: str = "exi
 
 # ── Node assembler ────────────────────────────────────────────────────────────
 
-def build_node(node: dict) -> tuple:
-    sections = _get_sections(node)
+def build_node(node: dict, api_inputs: list = None) -> tuple:
+    sections = _get_sections(node, api_inputs)
     h = HDR_H + sum(_section_total_h(s) for s in sections)
 
     cat         = CAT[node["style_key"]]
@@ -752,9 +808,10 @@ def build_node(node: dict) -> tuple:
         cid   += 1
         row_y  = ROW_H  # relative to section parent (below its own header)
         for label, row_type in sec["rows"]:
-            cells += _row_cell(str(cid), sec_parent, label, row_y, row_type)
+            rh = sec.get("details_h", DETAILS_H) if row_type == "details" else ROW_H
+            cells += _row_cell(str(cid), sec_parent, label, row_y, row_type, rh)
             cid   += 1
-            row_y += DETAILS_H if row_type == "details" else ROW_H
+            row_y += rh
         sec_y += sec_h
 
     return cells, CARD_W, h
@@ -804,7 +861,8 @@ def _edge_item(title: str, stroke: str) -> dict:
     return {"title": title, "w": 160, "h": 40, "xml": _compress(xml)}
 
 
-def generate(output_path: str) -> None:
+def generate(output_path: str, api_data: dict = None) -> None:
+    """api_data: optional dict keyed by activityName → full activity object from the API."""
     items = []
 
     print("  Connectors:")
@@ -814,7 +872,12 @@ def generate(output_path: str) -> None:
 
     print("\n  Nodes:")
     for node in NODES:
-        cells, w, h = build_node(node)
+        api_inputs = None
+        if api_data:
+            activity = api_data.get(node["subtitle"])
+            if activity:
+                api_inputs = activity.get("inputs", [])
+        cells, w, h = build_node(node, api_inputs)
         items.append({
             "title":  node["display"],
             "w":      w,
@@ -965,11 +1028,16 @@ if __name__ == "__main__":
                         help="WxCC bearer token — fetches live activities and diffs against library")
     args = parser.parse_args()
 
+    api_data = None
     if args.token:
         org = _org_from_token(args.token)
         print(f"Org ID : {org}")
         print(f"Project: {PROJECT_ID}\n")
         diff_api(args.token)
+        print("Fetching activity inputs for field tables…")
+        activities = fetch_api_activities(args.token)
+        api_data = {a["activityName"]: a for a in activities}
+        print(f"  Loaded inputs for {len(api_data)} activities\n")
 
     print(f"Generating WxCC draw.io library → {args.output}\n")
-    generate(args.output)
+    generate(args.output, api_data)
