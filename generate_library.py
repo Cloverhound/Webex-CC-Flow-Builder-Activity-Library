@@ -777,8 +777,42 @@ def _wrap(cells: str) -> str:
     )
 
 
+_EDGE_CONNECTORS = [
+    ("Normal Path",  "#1170cf"),
+    ("Error Path",   "#ab0a15"),
+    ("Timeout Path", "#7d4705"),
+]
+
+def _edge_item(title: str, stroke: str) -> dict:
+    style = (
+        f"rounded=1;orthogonalLoop=1;jettySize=auto;"
+        f"edgeStyle=orthogonalEdgeStyle;"
+        f"strokeColor={stroke};strokeWidth=2;fillColor=none;"
+        f"endArrow=block;endFill=1;fontSize=11;"
+    )
+    xml = (
+        '<mxGraphModel><root>'
+        '<mxCell id="0"/><mxCell id="1" parent="0"/>'
+        f'<mxCell id="2" value="" style="{style}" edge="1" parent="1">'
+        '<mxGeometry relative="1" as="geometry">'
+        '<mxPoint x="0" y="20" as="sourcePoint"/>'
+        '<mxPoint x="160" y="20" as="targetPoint"/>'
+        '</mxGeometry>'
+        '</mxCell>'
+        '</root></mxGraphModel>'
+    )
+    return {"title": title, "w": 160, "h": 40, "xml": _compress(xml)}
+
+
 def generate(output_path: str) -> None:
     items = []
+
+    print("  Connectors:")
+    for title, stroke in _EDGE_CONNECTORS:
+        items.append(_edge_item(title, stroke))
+        print(f"  ✓  {title:35s}  connector")
+
+    print("\n  Nodes:")
     for node in NODES:
         cells, w, h = build_node(node)
         items.append({
@@ -793,7 +827,7 @@ def generate(output_path: str) -> None:
     lib = f"<mxlibrary>{json.dumps(items, separators=(',', ':'))}</mxlibrary>"
     with open(output_path, "w", encoding="utf-8") as f:
         f.write(lib)
-    print(f"\nWrote {len(items)} shapes → {output_path}")
+    print(f"\nWrote {len(items)} items ({len(_EDGE_CONNECTORS)} connectors + {len(NODES)} shapes) → {output_path}")
 
 
 # ── API discovery ─────────────────────────────────────────────────────────────
