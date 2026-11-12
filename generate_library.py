@@ -630,8 +630,9 @@ _TBL  = ('<table width="100%" cellpadding="0" cellspacing="0" border="0" '
          'font-size:9px;{extra}">')
 _TH   = 'font-weight:bold;padding:2px 3px;border-bottom:1px solid #e5e7eb;'
 # Value row sits under each field and spans every column.
-_VALUE_ROW = ('<tr><td colspan="{n}" style="padding:1px 3px 2px 10px;' + _WRAP +
-              'border-bottom:1px dotted #d1d5db;">&nbsp;</td></tr>')
+_VALUE_ROW = ('<tr><td colspan="{n}" style="padding:2px 3px 2px 6px;' + _WRAP +
+              'background-color:#eef5fd;border-left:2px solid #1170cf;color:#111827;">'
+              '<span style="color:#1170cf;font-weight:bold;">&gt;</span>&nbsp;</td></tr>')
 
 
 def _build_inputs_html(inputs: list, outputs: list = None) -> tuple:
@@ -768,6 +769,9 @@ def _section_total_h(sec: dict) -> int:
 
 # ── Cell XML builders ─────────────────────────────────────────────────────────
 
+COLLAPSED_W = 56        # collapsed width: just the icon badge
+COLLAPSE_CARDS = True   # library tiles show only the title bar; click +/- on canvas to expand
+
 def _swimlane_container(cid: str, value_html: str, h: int, hdr_bg: str, entry_y: float,
                         tooltip: str = "") -> str:
     pts = json.dumps([[0, entry_y]], separators=(",", ":"))
@@ -780,6 +784,14 @@ def _swimlane_container(cid: str, value_html: str, h: int, hdr_bg: str, entry_y:
         f"points={pts};portConstraint=fixed;"
     )
     tooltip_attr = f' tooltip="{_xa(tooltip)}"' if tooltip else ""
+    if COLLAPSE_CARDS:
+        return (
+            f'<mxCell id="{cid}" value="{_xa(value_html)}" style="{_xa(style)}"'
+            f'{tooltip_attr} vertex="1" collapsed="1" parent="1">'
+            f'<mxGeometry x="0" y="0" width="{COLLAPSED_W}" height="{HDR_H}" as="geometry">'
+            f'<mxRectangle x="0" y="0" width="{CARD_W}" height="{h}" as="alternateBounds"/>'
+            f'</mxGeometry></mxCell>'
+        )
     return (
         f'<mxCell id="{cid}" value="{_xa(value_html)}" style="{_xa(style)}"'
         f'{tooltip_attr} vertex="1" parent="1">'
@@ -867,7 +879,7 @@ def build_node(node: dict, api_inputs: list = None, api_event: dict = None, api_
             row_y += rh
         sec_y += sec_h
 
-    return cells, CARD_W, h
+    return cells, (COLLAPSED_W if COLLAPSE_CARDS else CARD_W), h
 
 
 # ── Compression & output ───────────────────────────────────────────────────────
@@ -942,7 +954,7 @@ def generate(output_path: str, api_data: dict = None, api_events: dict = None) -
         items.append({
             "title":  node["display"],
             "w":      w,
-            "h":      h,
+            "h":      HDR_H if COLLAPSE_CARDS else h,
             "aspect": "fixed",
             "xml":    _compress(_wrap(cells)),
         })
@@ -1087,7 +1099,11 @@ if __name__ == "__main__":
                         help="Output .xml path (default: WxCC-FlowBuilder-Activities.xml)")
     parser.add_argument("--token", "-t", metavar="BEARER_TOKEN",
                         help="WxCC bearer token — fetches live activities and diffs against library")
+    parser.add_argument("--expanded", action="store_true",
+                        help="Drop shapes fully expanded instead of collapsed to the title bar")
     args = parser.parse_args()
+    if args.expanded:
+        COLLAPSE_CARDS = False
 
     api_data = None
     api_events = None
