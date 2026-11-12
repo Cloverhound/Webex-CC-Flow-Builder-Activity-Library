@@ -813,7 +813,7 @@ def _row_cell(cid: str, parent_id: str, label: str, y: int, row_type: str = "exi
         style = (
             "text;strokeColor=#d1d5db;fillColor=none;"
             "align=left;verticalAlign=top;whiteSpace=wrap;html=1;"
-            "spacingLeft=4;spacingRight=4;spacingTop=4;fontSize=9;rotatable=0;"
+            "spacingLeft=4;spacingRight=4;spacingTop=4;fontSize=9;rotatable=0;overflow=hidden;"
             "fontColor=#000000;"
         )
         connectable, width = "0", CARD_W
