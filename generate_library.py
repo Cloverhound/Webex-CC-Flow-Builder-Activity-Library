@@ -624,24 +624,32 @@ _DETAILS_ROW_PX  = 15   # px per input field row
 _DETAILS_HEAD_PX = 20   # px for the table header row
 _DETAILS_PAD_PX  = 8    # top+bottom padding inside the details cell
 
-_VALUE_TD = '<td style="padding:1px 3px;border-bottom:1px dotted #d1d5db;">&nbsp;</td>'
+_WRAP = "word-break:break-word;overflow-wrap:anywhere;white-space:normal;"
+_TBL  = ('<table width="100%" cellpadding="0" cellspacing="0" border="0" '
+         'style="table-layout:fixed;border-collapse:collapse;font-family:Arial,sans-serif;'
+         'font-size:9px;{extra}">')
+_TH   = 'font-weight:bold;padding:2px 3px;border-bottom:1px solid #e5e7eb;'
+# Value row sits under each field and spans every column.
+_VALUE_ROW = ('<tr><td colspan="{n}" style="padding:1px 3px 2px 10px;' + _WRAP +
+              'border-bottom:1px dotted #d1d5db;">&nbsp;</td></tr>')
 
 
 def _build_inputs_html(inputs: list, outputs: list = None) -> tuple:
     """Return (html_string, height_px) for a Details cell given API inputs (and outputs).
     Flattens top-level inputs and their immediate children (depth-1 only).
-    Outputs, when present, are rendered as a second table below the inputs.
+    Each field is followed by an empty, wrapping Value row. Outputs get a second table.
     """
     flat = []
     for inp in inputs:
         flat.append((inp["name"], inp["type"], inp.get("required", False), 0))
         for child in inp.get("children", []):
             flat.append((child["name"], child["type"], child.get("required", False), 1))
-
-    h = _DETAILS_HEAD_PX + len(flat) * _DETAILS_ROW_PX + _DETAILS_PAD_PX
     outs = [(o["name"], o.get("type", "")) for o in (outputs or [])]
+
+    per = 2 * _DETAILS_ROW_PX            # field row + value row
+    h = _DETAILS_HEAD_PX + len(flat) * per + _DETAILS_PAD_PX
     if outs:
-        h += 6 + _DETAILS_HEAD_PX + len(outs) * _DETAILS_ROW_PX
+        h += 6 + _DETAILS_HEAD_PX + len(outs) * per
     h = max(h, DETAILS_H)
 
     rows_html = ""
@@ -649,42 +657,32 @@ def _build_inputs_html(inputs: list, outputs: list = None) -> tuple:
         pad = "&nbsp;&nbsp;" * indent
         req_cell = '<span style="color:#059669;">&#x2713;</span>' if req else ""
         rows_html += (
-            f"<tr>"
-            f'<td style="padding:1px 3px;">{pad}{_esc(name)}</td>'
-            f'<td style="padding:1px 3px;color:#6b7280;">{_esc(typ)}</td>'
-            f'<td style="padding:1px 3px;text-align:center;">{req_cell}</td>'
-            f'{_VALUE_TD}'
-            f"</tr>"
+            f'<tr><td style="padding:1px 3px;{_WRAP}">{pad}{_esc(name)}</td>'
+            f'<td style="padding:1px 3px;color:#6b7280;{_WRAP}">{_esc(typ)}</td>'
+            f'<td style="padding:1px 3px;text-align:center;">{req_cell}</td></tr>'
+            + _VALUE_ROW.format(n=3)
         )
 
     html = (
-        '<table width="100%" cellpadding="0" cellspacing="0" border="0" '
-        'style="table-layout:fixed;border-collapse:collapse;font-family:Arial,sans-serif;font-size:9px;">'
-        '<colgroup><col style="width:32%"/><col style="width:16%"/><col style="width:8%"/><col style="width:44%"/></colgroup>'
-        '<tr style="background-color:#f3f4f6;">'
-        '<td style="font-weight:bold;padding:2px 3px;border-bottom:1px solid #e5e7eb;">Field</td>'
-        '<td style="font-weight:bold;padding:2px 3px;border-bottom:1px solid #e5e7eb;">Type</td>'
-        '<td style="font-weight:bold;padding:2px 3px;border-bottom:1px solid #e5e7eb;">Req</td>'
-        '<td style="font-weight:bold;padding:2px 3px;border-bottom:1px solid #e5e7eb;">Value</td>'
-        "</tr>"
-        + rows_html
-        + "</table>"
+        _TBL.format(extra="")
+        + '<colgroup><col style="width:52%"/><col style="width:36%"/><col style="width:12%"/></colgroup>'
+        f'<tr style="background-color:#f3f4f6;"><td style="{_TH}">Field</td>'
+        f'<td style="{_TH}">Type</td><td style="{_TH}text-align:center;">Req</td></tr>'
+        + rows_html + "</table>"
     )
     if outs:
         out_rows = "".join(
-            f'<tr><td style="padding:1px 3px;">{_esc(n)}</td>'
-            f'<td style="padding:1px 3px;color:#6b7280;">{_esc(t)}</td>{_VALUE_TD}</tr>'
+            f'<tr><td style="padding:1px 3px;{_WRAP}">{_esc(n)}</td>'
+            f'<td style="padding:1px 3px;color:#6b7280;{_WRAP}">{_esc(t)}</td></tr>'
+            + _VALUE_ROW.format(n=2)
             for n, t in outs
         )
         html += (
-            '<table width="100%" cellpadding="0" cellspacing="0" border="0" '
-            'style="table-layout:fixed;border-collapse:collapse;font-family:Arial,sans-serif;font-size:9px;margin-top:6px;">'
-            '<colgroup><col style="width:32%"/><col style="width:24%"/><col style="width:44%"/></colgroup>'
-            '<tr style="background-color:#f3f4f6;">'
-            '<td style="font-weight:bold;padding:2px 3px;border-bottom:1px solid #e5e7eb;">Output</td>'
-            '<td style="font-weight:bold;padding:2px 3px;border-bottom:1px solid #e5e7eb;">Type</td>'
-            '<td style="font-weight:bold;padding:2px 3px;border-bottom:1px solid #e5e7eb;">Value</td>'
-            '</tr>' + out_rows + '</table>'
+            _TBL.format(extra="margin-top:6px;")
+            + '<colgroup><col style="width:60%"/><col style="width:40%"/></colgroup>'
+            f'<tr style="background-color:#f3f4f6;"><td style="{_TH}">Output</td>'
+            f'<td style="{_TH}">Type</td></tr>'
+            + out_rows + "</table>"
         )
     return html, h
 
